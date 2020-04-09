@@ -8,12 +8,13 @@ library(stringdist)
 set.seed(1234)
 cnf = config::get()
 old = theme_set(theme_minimal(base_family = "Noto Sans CJK SC"))
+pal = list("nestle" = cnf$nestle.col, "devon" = cnf$devon.col, "mengn" = cnf$mengn.col)
 
 # Load Data ---------------------------------------------------------------
 
 
 # url: https://item.jd.com/{productId}.html#comment
-load_brand <- function(conf, brand) {
+load_brand <- function(brand, conf) {
     
     rds = paste0(conf$dir, conf[[brand]], ".rds") 
     if (!file.exists(rds)) {
@@ -23,7 +24,10 @@ load_brand <- function(conf, brand) {
         rownames_to_column("id")
 }
 brands = list("nestle", "devon", "mengn")
-raw <- brands %>% map(load_brand, conf = cnf) %>% set_names(brands)
+raw <- brands %>% 
+    map(paste0, ".id") %>% 
+    map(~ load_brand(.x, cnf)) %>% 
+    set_names(brands)
 
 # add custom stop words to list
 custom_stops <- c(stopwords::stopwords("zh", source = "misc"), cnf$stop_words)
@@ -49,26 +53,27 @@ count_top_words <- . %>%
 top_words <- tidy %>% 
     map(count_top_words) %>% 
     set_names(brands) %>% 
-    bind_rows(.id = "brand")
+    bind_rows(.id = "brand") %>% 
+    mutate(brand = factor(brand, ordered = TRUE, levels = brands))
 
-plot_top_words <- function(df, title) {
+plot_top_words <- function(df, title, fill) {
     df %>% 
         ggplot(aes(reorder(word, n), n)) + 
-        geom_col(width = .3) +
+        geom_col(width = .3, fill = fill) +
         coord_flip() +
         labs(x = "", y = "", title = title)
 }
-top_words %>% subset(brand == "nestle") %>% plot_top_words("Most Freq Words in Nestle")
-top_words %>% subset(brand == "devon") %>% plot_top_words("Most Freq Words in Devon")
 
 # do compare 
 top_words %>% 
     ggplot(aes(word, n, col = brand)) + 
     geom_line(aes(group = word), col = "gray") + 
-    geom_point(size = 2) + 
+    geom_point(size = 3) + 
+    scale_y_continuous(limits = c(0, 500)) +
+    scale_color_manual(labels = cnf$zh_name, values = pal) +
     coord_flip() +
     theme(legend.position = "top") +
-    labs(x = "", y = "", col = "Brand", title = "Count of Top Words by Brand")
+    labs(x = "", y = "", col = "Brand", title = "Top Words Count by Brand")
 
 
 # Network  ----------------------------------------------------------------
@@ -91,7 +96,7 @@ plot_graph <- function(x) {
             aes(label = name),
             repel = TRUE,
             family = "Noto Sans CJK SC",
-            size = 3,
+            size = 5,
             point.padding = unit(0.2, "lines")
         ) +
         theme_void()
@@ -109,8 +114,8 @@ tidy$nestle %>%
     count(word, sort = TRUE) %>% 
     top_n(10, wt = n)
 
-tidy$devon %>% 
-    anti_join(tidy$nestle, by = "word") %>% 
+tidy$nestle %>% 
+    anti_join(tidy$mengn, by = "word") %>% 
     count(word, sort = TRUE) %>% 
     top_n(10, wt = n)
 
@@ -132,7 +137,7 @@ tf_idf %>%
     coord_flip() +
     scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
     scale_fill_brewer(palette = "Dark2") +
-    facet_wrap(~ brand, scales = "free") +
+    facet_wrap(~ brand, scales = "free", labeller = labeller(brand = as_vector(cnf$zh_name))) +
     labs(x = "", y = "")
 
 # quantify dissimilarity
