@@ -109,19 +109,21 @@ n_chars %>%
 
 
 # network of common pairing words
-make_graph <- function(df, term_min) {
+plot_graph <- function(df, term_min, edge = n) {
+    
+    e = enquo(edge)
     
     # beware of 2 layers of filtering
     g <- df %>%
-        # filter(!word %in% c("奶")) %>%
+        filter(!word %in% c("奶")) %>%
         pairwise_count(word, id, sort = TRUE, upper = FALSE) %>%
-        filter(n >= term_min) %>%
+        filter(n > term_min) %>%
         graph_from_data_frame()
     
     g %>%
         ggraph(layout = "fr") +
         geom_edge_link(
-            aes(edge_alpha = n),
+            aes(edge_alpha = rlang::as_name(e)),
             edge_width = 2,
             edge_colour = "navyblue",
             show.legend = FALSE
@@ -138,10 +140,10 @@ make_graph <- function(df, term_min) {
 }
 
 set.seed(1234)
-make_graph(tidy$nestle, 10)
-make_graph(tidy$anchr,  10)
-make_graph(tidy$devon,  25)
-make_graph(tidy$maxig,  25)
+plot_graph(tidy$nestle, 10)
+plot_graph(tidy$devon,  25)
+plot_graph(tidy$maxig,  25)
+plot_graph(tidy$anchr,  25)
 
 # Compare Differences -----------------------------------------------------
 
@@ -168,13 +170,13 @@ tf_idf %>%
     geom_col(width = .3, show.legend = FALSE) +
     coord_flip() +
     scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
-    scale_fill_brewer(palette = "Dark2") +
+    scale_fill_manual(values = pal) +
     facet_wrap(~ brand, scales = "free_y", labeller = labeller(brand = as_vector(cnf))) +
     labs(x = "", y = "")
 
 # for Maxigenes case
-x <- tidy$maxig %>% filter(word == "一罐") %>% pull(id)
-raw$maxig[unique(x),]
+x <- tidy$anchr %>% filter(word == "手感") %>% pull(id)
+raw$anchr[unique(x),]
 
 # quantify dissimilarity
 tf_idf_by_brand <- tf_idf %>% 
@@ -196,3 +198,20 @@ map(xy_comb,
     ~ jaccard(tf_idf_by_brand[[.x[[1]]]]$word,
               tf_idf_by_brand[[.x[[2]]]]$word)) %>%
     set_names(xy_name)
+
+
+# Network TF-IDF ----------------------------------------------------------
+
+tf_idf_graph <- function(brand, term_min) {
+    tidy %>% 
+        `[[`(brand) %>% 
+        filter(word %in% tf_idf_by_brand[[brand]]$word) %>% 
+        plot_graph(term_min = term_min)
+}
+set.seed(1234)
+tf_idf_graph("nestle", 1)
+tf_idf_graph("devon",  2)
+tf_idf_graph("maxig",  2)
+tf_idf_graph("anchr",  2)
+
+
