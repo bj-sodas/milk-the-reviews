@@ -5,12 +5,21 @@ library(widyr)
 library(igraph)
 library(ggraph)
 library(stringdist)
+
+# global
 set.seed(1234)
-cnf = config::get()
-old = theme_set(theme_minimal(base_family = "Noto Sans CJK SC"))
+cnf    = config::get()
+pref   = config::get(config = "pref")
+old    = theme_set(theme_minimal(base_family = "Noto Sans CJK SC"))
+brands = names(cnf)
 
 # define color palette
-pal = list("nestle" = cnf$nestle.col, "devon" = cnf$devon.col, "maxig" = cnf$maxig.col)
+pal = list(
+    "nestle" = pref$nestle.col,
+    "devon"  = pref$devon.col,
+    "maxig"  = pref$maxig.col,
+    "anchr"  = pref$anchr.col
+)
 
 # Load Data ---------------------------------------------------------------
 
@@ -25,20 +34,20 @@ load_brand <- function(brand, conf) {
     tibble(comment = readRDS(rds)) %>% 
         rownames_to_column("id")
 }
-brands = list("nestle", "devon", "mengn")
-raw <- brands %>% 
+
+raw <- names(cnf) %>% 
     map(paste0, ".id") %>% 
-    map(~ load_brand(.x, cnf)) %>% 
+    map(~ load_brand(.x, pref)) %>% 
     set_names(brands)
 
 # add custom stop words to list
-custom_stops <- c(stopwords::stopwords("zh", source = "misc"), cnf$stop_words)
+custom_stops <- c(stopwords::stopwords("zh", source = "misc"), read_lines("custom_stops.txt"))
 
 # the ICU library (used internally by the stringi package) is able to handle Chinese words
 tidy_words <- . %>% 
     unnest_tokens(word, comment, token = "words") %>% 
     filter(!word %in% custom_stops) %>% 
-    filter(!str_detect(word, "^\\d+$"))
+    filter(!str_detect(word, "^\\d+(\\W{1}\\d+)?$|[a-z]+"))
 
 # words collection
 tidy <- map(raw, tidy_words) %>% set_names(brands)
@@ -50,49 +59,73 @@ tidy <- map(raw, tidy_words) %>% set_names(brands)
 # collect respective top words
 count_top_words <- . %>% 
     count(word, sort = TRUE) %>% 
-    top_n(30, wt = n)
+    top_n(15, wt = n) %>% 
+    pull(word)
 
-top_words <- tidy %>% 
-    map(count_top_words) %>% 
-    set_names(brands) %>% 
+# compare across brands
+top_words <- tidy %>% map(count_top_words) %>% unlist()
+    
+tidy %>% 
     bind_rows(.id = "brand") %>% 
-    mutate(brand = factor(brand, ordered = TRUE, levels = brands))
-
-plot_top_words <- function(df, title, fill) {
-    df %>% 
-        ggplot(aes(reorder(word, n), n)) + 
-        geom_col(width = .3, fill = fill) +
-        coord_flip() +
-        labs(x = "", y = "", title = title)
-}
-
-# do compare 
-top_words %>% 
-    ggplot(aes(word, n, col = brand)) + 
+    filter(word %in% top_words) %>% 
+    count(brand, word, sort = TRUE) %>% 
+    mutate(brand = factor(brand, ordered = TRUE, levels = brands)) %>% 
+    ggplot(aes(reorder(word, n), n, col = brand)) + 
     geom_line(aes(group = word), col = "gray") + 
     geom_point(size = 3) + 
     scale_y_continuous(limits = c(0, 500)) +
-    scale_color_manual(labels = cnf$zh_name, values = pal) +
+    scale_color_manual(labels = as_vector(cnf), values = pal) +
     coord_flip() +
     theme(legend.position = "top") +
-    labs(x = "", y = "", col = "Brand", title = "Top Words Count by Brand")
+    labs(x = "", y = "", col = "", title = "Top Words Count by Brand")
+
+
+# Sentence Length Distribution --------------------------------------------
+
+
+n_chars <- map(raw, ~ nchar(.x$comment)) %>% 
+    as.data.frame() %>% 
+    gather(brand, nchar) %>% 
+    as_tibble()
+
+n_chars %>% 
+    filter(nchar < 300) %>% 
+    mutate(brand = factor(brand, ordered = TRUE, levels = brands)) %>% 
+    ggplot(aes(nchar, fill = brand)) + 
+    geom_histogram(
+        bins = 150,
+        alpha = .7,
+        show.legend = FALSE,
+        col = "white"
+    ) +
+    scale_x_continuous(breaks = seq(0, 300, 50)) +
+    scale_fill_manual(values = pal) +
+    facet_wrap(~ brand, ncol = 1,
+               labeller = labeller(brand = as_vector(cnf))) +
+    labs(x = "", y = "")
 
 
 # Network  ----------------------------------------------------------------
 
 
 # network of common pairing words
-make_graph <- . %>% 
-    pairwise_count(word, id, sort = TRUE, upper = FALSE) %>%
-    filter(n >= 30) %>% 
-    graph_from_data_frame() 
-
-plot_graph <- function(x) {
-    ggraph(x, layout = "fr") +
-        geom_edge_link(aes(edge_alpha = n),
-                       edge_width = 2,
-                       edge_colour = "navyblue",
-                       show.legend = FALSE) +
+make_graph <- function(df, term_min) {
+    
+    # beware of 2 layers of filtering
+    g <- df %>%
+        # filter(!word %in% c("奶")) %>%
+        pairwise_count(word, id, sort = TRUE, upper = FALSE) %>%
+        filter(n >= term_min) %>%
+        graph_from_data_frame()
+    
+    g %>%
+        ggraph(layout = "fr") +
+        geom_edge_link(
+            aes(edge_alpha = n),
+            edge_width = 2,
+            edge_colour = "navyblue",
+            show.legend = FALSE
+        ) +
         geom_node_point(size = 3, col = "darkblue") +
         geom_node_text(
             aes(label = name),
@@ -103,21 +136,18 @@ plot_graph <- function(x) {
         ) +
         theme_void()
 }
-tidy$nestle %>% make_graph() %>% plot_graph()
-tidy$devon  %>% make_graph() %>% plot_graph()
-tidy$mengn  %>% make_graph() %>% plot_graph()
 
+set.seed(1234)
+make_graph(tidy$nestle, 10)
+make_graph(tidy$anchr,  10)
+make_graph(tidy$devon,  25)
+make_graph(tidy$maxig,  25)
 
 # Compare Differences -----------------------------------------------------
 
 # between 2 brands only
 tidy$nestle %>% 
     anti_join(tidy$devon, by = "word") %>% 
-    count(word, sort = TRUE) %>% 
-    top_n(10, wt = n)
-
-tidy$nestle %>% 
-    anti_join(tidy$mengn, by = "word") %>% 
     count(word, sort = TRUE) %>% 
     top_n(10, wt = n)
 
@@ -131,7 +161,7 @@ tf_idf <- tidy %>%
 # take note of ranking within facet
 tf_idf %>% 
     group_by(brand) %>% 
-    top_n(30, wt = tf_idf) %>% 
+    top_n(25, wt = tf_idf) %>% 
     ungroup() %>% 
     mutate(brand = factor(brand, ordered = TRUE, levels = brands)) %>% 
     ggplot(aes(reorder_within(word, tf_idf, brand), tf_idf, fill = brand)) + 
@@ -139,22 +169,25 @@ tf_idf %>%
     coord_flip() +
     scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
     scale_fill_brewer(palette = "Dark2") +
-    facet_wrap(~ brand, scales = "free", labeller = labeller(brand = as_vector(cnf$zh_name))) +
+    facet_wrap(~ brand, scales = "free_y", labeller = labeller(brand = as_vector(cnf))) +
     labs(x = "", y = "")
+
+# for Maxigenes case
+x <- tidy$maxig %>% filter(word == "一罐") %>% pull(id)
+raw$maxig[unique(x),]
 
 # quantify dissimilarity
 tf_idf_by_brand <- tf_idf %>% 
-    group_by(brand) %>% 
-    top_n(30, wt = tf_idf) %>% 
-    ungroup() %>% 
+    filter(tf_idf > 0.00001) %>%
     select(brand, word) %>% 
+    # filter(!str_detect(word, "一")) %>% 
     split(.$brand, drop = TRUE)
 
 jaccard <- function(x, y) {
     length(intersect(x, y)) / length(union(x, y))
 }
 # test
-jaccard(tf_idf_by_brand$nestle$word, tf_idf_by_brand$devon$word)
+jaccard(tf_idf_by_brand$nestle$word, tf_idf_by_brand$anchr$word)
 
 # a scalable solution
 xy_comb <- cross2(brands, brands, .filter = ~ .x == .y)
