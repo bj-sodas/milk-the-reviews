@@ -8,7 +8,9 @@ library(stringdist)
 set.seed(1234)
 cnf = config::get()
 old = theme_set(theme_minimal(base_family = "Noto Sans CJK SC"))
-pal = list("nestle" = cnf$nestle.col, "devon" = cnf$devon.col, "mengn" = cnf$mengn.col)
+
+# define color palette
+pal = list("nestle" = cnf$nestle.col, "devon" = cnf$devon.col, "maxig" = cnf$maxig.col)
 
 # Load Data ---------------------------------------------------------------
 

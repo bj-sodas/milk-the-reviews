@@ -1,10 +1,10 @@
 default:
   dir: "Data/"
-  nestle.id: 725211
+  nestle.id: 5480615
   nestle.col: "#EF946C"
   devon.id: 1805141
   devon.col: "#C4A77D"
-  mengn.id: 1522584
-  mengn.col: "#70877F"
-  stop_words: !expr c("京", "东", "奶粉", "喝", "买", "雀巢", "德", "运", "蒙", "牛", "很好", "非常", "不错", "没有", "款")
-  zh_name: !expr list("nestle" = "Nestle", "devon" = "Devondale", "mengn" = "Meng Niu")
+  maxig.id: 2087536
+  maxig.col: "#70877F"
+  stop_words: !expr c("京", "东", "奶粉", "喝", "买", "雀巢", "德", "运", "美可卓", "很好", "非常", "不错", "没有", "款")
+  zh_name: !expr list("nestle" = "Nestle", "devon" = "Devondale", "maxig" = "Maxigenes")
