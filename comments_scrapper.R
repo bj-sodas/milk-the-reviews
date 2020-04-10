@@ -1,7 +1,7 @@
 library(tidyverse)
 library(httr)
 library(jsonlite)
-library(text2vec)
+library(progress)
 
 # from JD.com
 form_url <- function(productId, pageX) {
@@ -29,7 +29,20 @@ fetch_data <- function(url, delay = 1) {
         pluck("comments", "content")
 }
 
-# raw <- map(1:50, ~ fetch_data(form_url(1522584, .x))) %>% unlist()
+scrape_comments <- function(id, pages) {
+    
+    urls = map(1:pages, ~ form_url(id, .x))
+    pb   = progress_bar$new(total = length(urls))
+    
+    resp = map(urls, ~ {
+        pb$tick()
+        fetch_data(.x)
+    })
+    
+    unlist(resp)
+}
+
+raw <- scrape_comments(2087536, 50)
 
 txt <- raw %>% 
     # remove html unicodes
