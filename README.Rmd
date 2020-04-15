@@ -1,0 +1,285 @@
+---
+title: "README"
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+> This document is generated from README.Rmd. DO NOT edit here.
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width = 9)
+```
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidytext)
+library(text2vec)
+library(widyr)
+library(igraph)
+library(ggraph)
+library(stringdist)
+library(patchwork)
+
+# global
+set.seed(1234)
+cnf    = config::get()
+pref   = config::get(config = "pref")
+old    = theme_set(theme_minimal(base_family = "Noto Sans CJK SC"))
+brands = names(cnf)
+
+# define color palette
+pal = list(
+    "nestle" = pref$nestle.col,
+    "devon"  = pref$devon.col,
+    "maxig"  = pref$maxig.col,
+    "anchr"  = pref$anchr.col
+)
+```
+
+```{r raw}
+load_brand <- function(brand, conf) {
+    
+    rds = paste0(conf$dir, conf[[brand]], ".rds") 
+    if (!file.exists(rds)) {
+        return("File not found.")
+    }
+    tibble(comment = readRDS(rds)) %>% 
+        rownames_to_column("id")
+}
+
+raw <- names(cnf) %>% 
+    map(paste0, ".id") %>% 
+    map(~ load_brand(.x, pref)) %>% 
+    set_names(brands)
+```
+
+
+#### 宗旨 Motivation
+
+这是文本挖掘的一个示例，通过线上用户评论对某个物品或者垂直领域（多件物品组合）进行信息挖掘。主要突出了通过数据科学手段进行研究，在速度、拓展能力上的优势。示例将利用京东 (JD.com) 的用户评论，分别对4组进口成人奶粉品牌进行探索，了解各自品牌背后的声音。
+
+4 组品牌分别是：雀巢 (**Nestle Nido**), 德运 (**Devondale**), 美可卓 (**Maxigenes**), 安佳 (**Anchor**) 。
+
+我们在这里不会对代码进行诠释，源码可参考 [source](README.Rmd)。
+
+#### 数据源 Data Source
+
+数据源来自京东，具体地址请参考[附录](#product-url)。每组品牌收集了截止 2020-04-10 12:00 (*y-m-d h:m*) 前最新的 500 条评论。在这里确保每一组的数据量统一是重要的。另外需要说明一点，每组品牌（成人奶粉）的物品都来自单一售卖链接，这里存在一定风险，京东可能利用不同的售卖链接针对不同的客户群（地理位置、用户画像等）进行不同的推广或者展示排名。这样一来，从单一的售卖链接解读某品牌或者物品不能概括所有的用户群体，有失公正。仅为了示例用途，我们在这里不会过于强调这点，但在现实场景中请务必确保数据的涵盖范围尽可能完善。
+
+#### 词频 Term Count
+
+文本挖掘通常的第一步都是把词拆解为 tokens，这里也不例外。`stringi` 内部使用了 ICU (International Components for Unicode) 插件，可以直接对中文进行处理。举例：
+
+```{r, echo=TRUE}
+stringi::stri_split_boundaries("我是一只小小小小鸟", type = "word", simplify = TRUE)
+```
+
+在这里，我们共有4 个品牌，每个品牌有 500 条评论，每条评论可分解为 𝓂 个 tokens，一个 token 简单代表一个词。在通过停用词表 (stopwords)  删除通用词后，我们汇集最常见的词汇，并对比这些词汇在所有品牌中的出现频率。
+
+```{r}
+# add custom stop words to list
+custom_stops <- c(stopwords::stopwords("zh", source = "misc"), read_lines("custom_stops.txt"))
+
+# the ICU library (used internally by the stringi package) is able to handle Chinese words
+tidy_words <- . %>% 
+    unnest_tokens(word, comment, token = "words") %>% 
+    filter(!word %in% custom_stops) %>% 
+    filter(!str_detect(word, "^\\d+(\\W{1}\\d+)?$|[a-z]+"))
+
+# words collection
+tidy <- map(raw, tidy_words) %>% set_names(brands)
+
+# collect respective top words
+count_top_words <- . %>% 
+    count(word, sort = TRUE) %>% 
+    top_n(15, wt = n) %>% 
+    pull(word)
+
+# compare across brands
+top_words <- tidy %>% map(count_top_words) %>% unlist()
+    
+tidy %>% 
+    bind_rows(.id = "brand") %>% 
+    filter(word %in% top_words) %>% 
+    count(brand, word, sort = TRUE) %>% 
+    mutate(brand = factor(brand, ordered = TRUE, levels = brands)) %>% 
+    ggplot(aes(reorder(word, n), n, col = brand)) + 
+    geom_line(aes(group = word), col = "gray") + 
+    geom_point(size = 3) + 
+    scale_y_continuous(limits = c(0, 500)) +
+    scale_color_manual(labels = as_vector(cnf), values = pal) +
+    coord_flip() +
+    theme(legend.position = "top") +
+    labs(x = "", y = "", col = "", title = "Top Words by Brand")
+```
+
+这个模块探索的重点是对出现频率相差明显巨大的词汇进行关注，寻找线索。举例，针对“口感”“营养”“脱脂”这三个关键词，Anchor 的量比其他品牌都来得多。要记得各个品牌对比的基数是一致的（500 条评论），所以当某个品牌凸显某些关键词时，可能是条线索。当前所收集的词汇也让我们对整体成人奶粉领域有了初步的大画面。
+
+另外一个有意思的现象，Nestle 的词频一致性的比其他品牌来的少，为什么？是奶粉本身的问题？还是像以上所说的，售卖链接的因素？基于这个问题延伸，我们看一看各个品牌评论用词长度的分布。
+
+```{r}
+n_chars <- map(raw, ~ nchar(.x$comment)) %>% 
+    as.data.frame() %>% 
+    gather(brand, nchar) %>% 
+    as_tibble()
+
+n_chars %>% 
+    filter(nchar < 300) %>% 
+    mutate(brand = factor(brand, ordered = TRUE, levels = brands)) %>% 
+    ggplot(aes(nchar, fill = brand)) + 
+    geom_histogram(
+        bins = 150,
+        show.legend = FALSE,
+        col = "white"
+    ) +
+    scale_x_continuous(breaks = seq(0, 300, 50)) +
+    scale_fill_manual(values = pal) +
+    facet_wrap(~ brand, ncol = 1,
+               labeller = labeller(brand = as_vector(cnf))) +
+    coord_cartesian(xlim = c(0, 200)) +
+    labs(x = "", y = "", title = "Sentence Length of All Comments by Brand")
+```
+
+很明显，Nestle 的分布与其他品牌不在同一个标准上。这意味着 Nestle 用户的评论一般都比较短，具体原因有待考证。至少我们有了新的意识，针对 Nestle 后续的分析得抱有质疑。
+
+#### 网络 Network 
+
+这里指的网络是关系网络，而关系指的是词汇之间的关系。这个模块探索的重点是把之前收集的词汇拼接起来，加强我们对各个品牌的印象。节点 (node) 代表一个词，而节点与节点之间的连接 (link) 具有不同的链接强度。颜色的深浅代表同时出现的频率（越深越多）。
+
+在这里我们不展开分析，通过简单的扫描，我们可以注意到以下几点，
+
+1. Nestle 的网络相对零散，用户评价良好但可以突出的重点不多；
+2. Devondale 和 Maxigenes 的网络非常相似。以【味道】为中心，并延伸出一个和【味道】紧连接的小群 (cluster)；
+3. Anchor 的网络以一个密度很高的小群为中心，小群包含了【营养】【味道】【香】【浓】【包装】的字眼；
+
+```{r, warning=FALSE}
+# network of common pairing words
+plot_graph <- function(df, term_min, col = "navyblue", title = "") {
+    
+    # beware of 2 layers of filtering
+    g <- df %>%
+        filter(!word %in% c("奶")) %>%
+        pairwise_count(word, id, sort = TRUE, upper = FALSE) %>%
+        filter(n > term_min) %>%
+        graph_from_data_frame()
+    
+    g %>%
+        ggraph(layout = "fr") +
+        geom_node_point(col = col) +
+        geom_edge_link(
+            aes(edge_alpha = n),
+            edge_width = 2,
+            edge_colour = col,
+            show.legend = FALSE
+        ) +
+        geom_node_text(
+            aes(label = name),
+            repel = TRUE,
+            family = "Noto Sans CJK SC",
+            size = 3,
+            point.padding = unit(0.2, "lines")
+        ) +
+        theme_void(base_family = "Menlo", base_size = 9) +
+        labs(title = title)
+}
+
+set.seed(1234)
+plot_graph(tidy$nestle, 10, pal$nestle, "Nestle")
+plot_graph(tidy$devon,  25, pal$devon, "Devondale")
+plot_graph(tidy$maxig,  25, pal$maxig, "Maxigenes")
+plot_graph(tidy$anchr,  25, pal$anchr, "Anchor")
+```
+
+
+#### TF-IDF 
+
+这个模块的重点在于如何通过现成的统计方法挑选出针对各个品牌的关键词汇，从而探索它们各自的特点。
+
+TF-IDF 是一种文本挖掘的常用加权技术。主要思想是字词的重要性随着它在文本中出现的频率成正比增加，但同时会随着它在语料库中 (documents) 出现的频率成反比下降。举例，【味道】一词会出现许多次，可是它也会出现在每个品牌里，所以它的权重就会被降低。相反的，【减肥】一词也可能出现多次，可是只限于在某个品牌里，所以权重就会比【味道】来的高。这么一来，通过排除出现在每个品牌的普遍词汇，我们就可以得出针对各个品牌的关键词汇。
+
+在这里可以具体关注以下几个关键词：
+
+1. 【减肥】- 哪些品牌对节食群体具有吸引力？
+2. 【雪花】【酥】【黄油】【调制】【烘焙】- 我们发现用户购买成人奶粉的用途之一是进行烘焙；
+3. 【设计】【外观】- 用户如何评价外形包装？
+
+如果你对 Maxigenes 的关键词【可爱】【胖胖】感到好奇，这是因为 Maxigenes 利用较为独特的罐子进行包装，并以“蓝胖子”一个绰号进行市场推广。
+
+```{r, fig.height=13}
+# bind tf-idf
+tf_idf <- tidy %>% 
+    map(~ count(.x, word, sort = TRUE)) %>% 
+    bind_rows(.id = "brand") %>% 
+    bind_tf_idf(word, brand, n) %>% 
+    arrange(desc(tf_idf))
+
+# take note of ranking within facet
+tf_idf %>% 
+    group_by(brand) %>% 
+    top_n(25, wt = tf_idf) %>% 
+    ungroup() %>% 
+    mutate(brand = factor(brand, ordered = TRUE, levels = brands)) %>% 
+    ggplot(aes(reorder_within(word, tf_idf, brand), tf_idf, fill = brand)) + 
+    geom_col(width = .3, show.legend = FALSE) +
+    coord_flip() +
+    scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
+    scale_fill_manual(values = pal) +
+    facet_wrap(~ brand, scales = "free_y", labeller = labeller(brand = as_vector(cnf))) +
+    labs(x = "", y = "", title = "TF-IDF by Brand")
+```
+
+
+同样的，我们可以通过网络把关键词之间的关联关系可视化展现出来。为了简化图表，这里用了节点数量作为下限 (threshold) 把部分词汇删除。
+
+```{r, fig.height=13}
+tf_idf_by_brand <- tf_idf %>% 
+    filter(tf_idf > 0.00001) %>%
+    select(brand, word) %>% 
+    split(.$brand, drop = TRUE)
+
+tf_idf_graph <- function(brand, term_min, col, title) {
+    tidy %>% 
+        `[[`(brand) %>% 
+        filter(word %in% tf_idf_by_brand[[brand]]$word) %>% 
+        plot_graph(term_min = term_min, col = col, title = title)
+}
+
+set.seed(1234)
+p1 = tf_idf_graph("nestle", 1, pal$nestle, title = "Nestle (threshold = 1)")
+p2 = tf_idf_graph("devon",  2, pal$devon,  title = "Devondale (threshold = 2)")
+p3 = tf_idf_graph("maxig",  3, pal$maxig,  title = "Maxigenes (threshold = 3)")
+p4 = tf_idf_graph("anchr",  3, pal$anchr,  title = "Anchor (threshold = 3)")
+(p1 + p2) / (p3 + p4)
+```
+
+#### 总结
+
+这个示例展示了如何利用文本挖掘从用户反馈中进行信息提炼。我们首先利用词频对主题进行初步探索。接下来我们利用网络把词汇之间的关系串联起来。最后利用 TF-IDF 提取针对性的关键词。
+假设你是一名商业分析师，利用这个框架可以快速的了解某个物品或者垂直领域，大大提升了在效率上的优势。
+
+我们在这里只是蜻蜓点水，针对文本挖掘的技能还有许多，包括了实体识别、情感分析、主题提取等。这些技能在商业智能上也存在巨大的空间等着被发掘。举例，在这篇论文中，3 名来自 NYU 的作者利用文本挖掘[衡量产品特征的定价权](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1024903)。甚至有学者们[利用情感分析预判股票的走势](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3489226)。这就是数据科学的力量。
+
+## Appendix
+
+#### <a name="product-url"></a>Product URL
+
+```{r}
+d <- data.frame(
+    Brand = c("Nestle", "Devondale", "Maxigenes", "Anchor"),
+    URL = c(
+        "https://item.jd.com/5480615.html",
+        "https://item.jd.com/14817375522.html",
+        "https://item.jd.com/100004553486.html",
+        "https://item.jd.com/1805141.html"
+    )
+)
+knitr::kable(d)
+```
+
+#### Session Info
+
+```{r}
+print(sessionInfo(), locale = FALSE)
+```
+
