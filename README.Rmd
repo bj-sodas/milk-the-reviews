@@ -144,7 +144,7 @@ n_chars %>%
     labs(x = "", y = "", title = "Sentence Length of All Comments by Brand")
 ```
 
-很明显，Nestle 的分布与其他品牌不在同一个"档"上。至于为什么 Nestle 用户的评论一般都比较短，具体原因有待考证。至少我们有了新的意识，针对 Nestle 后续的分析得抱有质疑,不能盲目下判断。
+很明显，Nestle 的分布与其他品牌不在同一个"档"上。至于为什么 Nestle 用户的评论一般都比较短，具体原因有待考证。至少我们有了新的意识，针对 Nestle 后续的分析得抱有质疑，不能盲目下判断。
 
 #### 网络 Network 
 
@@ -255,6 +255,8 @@ p3 = tf_idf_graph("maxig",  3, pal$maxig,  title = "Maxigenes (threshold = 3)")
 p4 = tf_idf_graph("anchr",  3, pal$anchr,  title = "Anchor (threshold = 3)")
 (p1 + p2) / (p3 + p4)
 ```
+
+我们可以观察到就算在 threshold = 3 的限制下，Anchor 任然呈现了相当丰富的内容。再往下细看，中间有个小群，内部密度很高却不与外部其他关键词产生连接（【淡黄色】【油脂】【疑惑】【嘴】...）。这是条有趣的线索，可以继续往下探索。
 
 #### 总结
 
